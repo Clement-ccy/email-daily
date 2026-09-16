@@ -1,0 +1,16 @@
+{
+  "hermes_home": "/Users/scy/.hermes",
+  "timezone": "Asia/Shanghai",
+  "since_hours": 24,
+  "max_messages": 20,
+  "unseen_only": false,
+  "llm": {
+    "base_url": "https://sub.shengchuiye.com/v1",
+    "model": "MiniMax-M3",
+    "timeout_seconds": 30
+  },
+  "imap": {
+    "host": "imap.qq.com",
+    "port": 993
+  }
+}
