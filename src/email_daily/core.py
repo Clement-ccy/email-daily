@@ -111,23 +111,76 @@ def fetch_mail(since_hours: int, max_messages: int,
     Default scope is `ALL SINCE <cutoff>` — covers read + unread so digest
     summarises everything received in the window. unread_only=True switches
     to UNSEEN for the legacy narrow behaviour.
+
+    Important: server-side `SINCE` is unreliable on some IMAP servers (e.g.
+    QQ Mail ignores it entirely), so this function applies the time filter
+    CLIENT-SIDE using INTERNALDATE (the server-stamped arrival time in UTC).
+    We still pass SINCE to the server as a hint to limit transfer volume.
     """
-    cutoff = datetime.now(CST) - timedelta(hours=since_hours)
-    cutoff_str = cutoff.strftime("%d-%b-%Y")
+    cutoff_cst = datetime.now(CST) - timedelta(hours=since_hours)
+    cutoff_utc = cutoff_cst.astimezone(timezone.utc)
+    # Pass SINCE one day earlier than the actual cutoff — the server uses
+    # day-granularity for SINCE, so anything within ±24h of the cutoff
+    # could be missed if we passed exactly the day. The client-side filter
+    # is the authoritative one.
+    since_hint = (cutoff_utc - timedelta(days=1)).strftime("%d-%b-%Y")
+    cutoff_str = cutoff_cst.strftime("%d-%b-%Y")
     out: list[MailItem] = []
 
     with imaplib.IMAP4_SSL(host, port, timeout=30) as imap:
         imap.login(user, password)
         imap.select("INBOX", readonly=True)
         flag = "UNSEEN" if unseen_only else "ALL"
-        typ, data = imap.search(None, f'({flag} SINCE {cutoff_str})')
+        typ, data = imap.search(None, f'({flag} SINCE {since_hint})')
         if typ != "OK" or not data or not data[0]:
             return out
         ids = data[0].split()
-        # newest first by default
-        ids = ids[-max_messages:]
+        # Walk newest-first; stop once we've seen enough older messages.
+        # Cap the candidate pool so a 2000-message inbox doesn't burn time.
+        # Worst case: 24h of mail ≤ 200 on a busy day; 2000 is generous headroom.
+        candidate_pool = 2000
+        ids = ids[-candidate_pool:]
 
-        for num in ids:
+        # Bulk-fetch INTERNALDATE for all candidates in one round-trip
+        # (cheaper than per-message FETCH). Then apply the cutoff filter
+        # in memory. INTERNALDATE is monotonically increasing with mailbox
+        # order, so walking newest-first lets us stop at the cutoff.
+        id_range = b",".join(ids).decode() if isinstance(ids[0], bytes) else ",".join(ids)
+        typ, internal_all = imap.fetch(id_range, "(INTERNALDATE)")
+        if typ != "OK":
+            return out
+        # Response shape: alternating ([b'1 (INTERNALDATE "...")'], b')').
+        # We iterate and parse per-message, then drop ones older than cutoff.
+        from email.utils import parsedate_to_datetime as _ptd
+        # Parse `1 (INTERNALDATE "...") 2 (INTERNALDATE "...") ...` style.
+        # imaplib returns each item; for bulk fetch, the entire string is one item.
+        raw_blob = b""
+        for item in internal_all:
+            if isinstance(item, bytes):
+                raw_blob += item + b"\n"
+            elif isinstance(item, tuple) and len(item) >= 1 and isinstance(item[0], bytes):
+                raw_blob += item[0] + b"\n"
+        # Parse pairs of (msg_id, internaldate_str)
+        pairs = re.findall(rb'(\d+)\s+\(INTERNALDATE\s+"([^"]+)"', raw_blob)
+        # Parse to UTC datetimes; drop unparseable rows.
+        # NOTE: imap.search returns ids in mailbox-order (oldest first), NOT
+        # newest-first, so we cannot early-break on the first old row.
+        # Sort by arrival time descending and then take the cutoff window.
+        from email.utils import parsedate_to_datetime as _ptd
+        annotated: list[tuple[datetime, bytes]] = []
+        for mid_str, idate_str in pairs:
+            try:
+                arrival_utc = _ptd(idate_str.decode()).astimezone(timezone.utc)
+            except (TypeError, ValueError):
+                continue
+            mid_b = mid_str.encode() if isinstance(mid_str, str) else mid_str
+            annotated.append((arrival_utc, mid_b))
+        annotated.sort(key=lambda x: x[0], reverse=True)  # newest first
+        filtered_ids: list[bytes] = [mid for arrival, mid in annotated
+                                     if arrival >= cutoff_utc][:max_messages]
+
+        # Now fetch the full RFC822 only for messages that survived the filter.
+        for num in filtered_ids:
             typ, msg_data = imap.fetch(num, "(RFC822)")
             if typ != "OK" or not msg_data or not msg_data[0]:
                 continue
@@ -193,6 +246,9 @@ def _llm_summarize(items: list[MailItem], api_key: str, base_url: str,
         headers={
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
+            # Cloudflare UA filter (error code 1010) blocks default Python UA.
+            # curl UA passes through — sub2api gateway behind CF allows it.
+            "User-Agent": "curl/8.4.0",
         },
         method="POST",
     )
