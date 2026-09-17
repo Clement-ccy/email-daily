@@ -259,7 +259,11 @@ def _llm_summarize(items: list[MailItem], api_key: str, base_url: str,
         print(f"[email-daily] LLM call failed: {exc}", file=sys.stderr)
         return None
     try:
-        return data["choices"][0]["message"]["content"].strip()
+        content = data["choices"][0]["message"]["content"].strip()
+        # Strip reasoning traces emitted by reasoning-capable models (M-series).
+        # They wrap thoughts in <think>...</think> tags that pollute the digest.
+        content = re.sub(r"<think>.*?</think>\s*", "", content, flags=re.DOTALL).strip()
+        return content
     except (KeyError, IndexError, TypeError):
         print(f"[email-daily] LLM response malformed: {data!r}", file=sys.stderr)
         return None
