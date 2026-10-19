@@ -1,8 +1,10 @@
 """IMAP fetch + LLM digest for the daily QQ digest cron job.
 
-Self-contained, no third-party deps (Python stdlib only). Designed to run from
-~/.hermes/scripts/email-daily-digest.sh on a Mac; environment is sourced from
-~/.hermes/.env so secrets stay there.
+Self-contained, no third-party deps (Python stdlib only). Invoked by
+`scripts/email-daily-digest.sh` in this repo (via the thin cron wrapper in
+`$HERMES_HOME/scripts/`); environment is sourced from `$HERMES_HOME/.env` so
+secrets stay there. Paths are resolved at runtime — nothing is hardcoded to a
+single machine, so the repo runs unchanged on macOS, Linux and Windows.
 
 Public entry point:
     build_digest(since_hours=24, max_messages=20, unseen_only=False,

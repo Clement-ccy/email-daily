@@ -6,9 +6,10 @@ Daily email digest pipeline: pull last 24h of inbox email via IMAP, summarize vi
 
 ```
 cron job (no_agent=true, deliver="qqbot")
-  └─ wrapper script: ~/.hermes/scripts/email-daily-digest.sh
+  └─ wrapper script: $HERMES_HOME/scripts/email-daily-digest.sh
       └─ real script: scripts/email-daily-digest.sh  (this repo)
-          ├─ sources ~/.hermes/.env  (IMAP_USER / IMAP_PASS / OPENAI_API_KEY)
+          ├─ resolves Python portably (EMAIL_DAILY_PY override → probe candidates)
+          ├─ sources $HERMES_HOME/.env  (IMAP_USER / IMAP_PASS / OPENAI_API_KEY)
           └─ exec `python -m email_daily --since-hours 24 --max-messages 20`
                 ├─ imaplib fetch  (default: ALL SINCE <cutoff>, not UNSEEN)
                 ├─ urllib POST → LLM_BASE_URL/v1/chat/completions  (Bearer token)
@@ -16,6 +17,21 @@ cron job (no_agent=true, deliver="qqbot")
 ```
 
 The wrapper script exists because Hermes cron only resolves `script` targets inside `$HERMES_HOME/scripts/` — see [Hermes cron docs](https://hermes-agent.nousresearch.com/docs/user-guide/features/cron). Edits belong here in `scripts/`, not in the wrapper.
+
+## Portability (macOS / Linux / Windows)
+
+Everything is resolved at runtime; no machine-specific paths are baked in.
+
+| Concern | How it's handled |
+|---------|------------------|
+| Repo location | Wrapper probes `EMAIL_DAILY_ROOT` → `$HOME/Repo/...` → `%USERPROFILE%/Repo/...` → `/c/Repo/...` |
+| `$HERMES_HOME` | Taken from env; on Windows falls back to `%LOCALAPPDATA%/hermes` |
+| Python interpreter | `EMAIL_DAILY_PY` override, else probe `python3`/`python`/`py` **by executing** each (`command -v` can hit the Microsoft Store stub), else Hermes-managed `python.exe` |
+| `PYTHONPATH` separator | `;` on MINGW/MSYS, `:` elsewhere |
+| MSYS paths | `cygpath -m` converts `/c/Repo/...` → `C:/Repo/...` for native `python.exe` |
+| Line endings | `.gitattributes` forces `eol=lf` for shell scripts |
+
+Windows cron note: the job's `workdir` must be a native path (`C:\Repo\SCY-OS\email-daily`), not the macOS `/Users/...` path.
 
 ## Files
 
@@ -50,8 +66,8 @@ Existing job (`defae651cee1`, name `email-daily-digest-qq`) is already wired:
 
 ```yaml
 schedule:        0 9 * * *           # 09:00 CST daily
-script:          email-daily-digest.sh (wrapper under ~/.hermes/scripts/)
-workdir:         ~/Repo/SCY-OS/email-daily
+script:          email-daily-digest.sh (wrapper under $HERMES_HOME/scripts/)
+workdir:         C:\Repo\SCY-OS\email-daily   # native path per host
 deliver:         qqbot                # default DM thread
 no_agent:        true                 # script stdout → QQ DM
 failure_deliver: qqbot                # error alert also to QQ DM
@@ -63,7 +79,11 @@ failure_deliver: qqbot                # error alert also to QQ DM
 # Dry run (no LLM if key unset; uses fallback)
 PYTHONPATH=src python -m email_daily --dry-run --since-hours 1
 
-# Real run with manual inspection
+# Windows git-bash: PYTHONPATH needs ';' and a native path
+PYTHONPATH='C:/Repo/SCY-OS/email-daily/src' python -m email_daily --dry-run --since-hours 1
+
+# Real run with manual inspection (portable entry: resolves repo + python itself)
+bash "$HERMES_HOME/scripts/email-daily-digest.sh" --dry-run
 bash scripts/email-daily-digest.sh
 ```
 
@@ -77,7 +97,9 @@ Default scope is `ALL SINCE <cutoff>` (read + unread) — digest summarises **ev
 
 | Symptom | Cause | Fix |
 |---------|-------|-----|
-| `⚠️ IMAP_USER/IMAP_PASS 未配置` | .env not loaded or empty | Check `~/.hermes/.env` |
+| `⚠️ IMAP_USER/IMAP_PASS 未配置` | .env not loaded or empty | Check `$HERMES_HOME/.env` (`%LOCALAPPDATA%\hermes\.env` on Windows) |
 | `⚠️ IMAP 抓取失败` | Network / wrong host / wrong pass | Verify IMAP_HOST/PORT and 授权码 |
+| `No module named email_daily` | `PYTHONPATH` used `:` on Windows, or an MSYS `/c/...` path | Use `;` separator + native `C:/...` path (script does this automatically) |
+| `Python not found` / Store stub | `command -v python` hit the Microsoft Store alias | Set `EMAIL_DAILY_PY` to a real interpreter |
 | `LLM call failed: HTTP 403` | Token rejected by Sub2API | Refresh OPENAI_API_KEY in VPS Sub2API dashboard |
 | `delivery error: QQBot send failed` | gateway / channel disconnected | `hermes gateway status` + QQ bot reconnect |
