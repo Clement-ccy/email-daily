@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # ~/Repo/SCY-OS/email-daily/scripts/email-daily-digest.sh
 # Cron pre-run script for the daily email digest job.
-# Sourced env must include IMAP_USER / IMAP_PASS / (optional) OPENAI_API_KEY.
+# Sourced env must include IMAP_USER / IMAP_PASS and LLM_API_KEY
+# (+ optional LLM_BASE_URL / LLM_MODEL, which override the code defaults).
 # stdout becomes the QQ message body; empty stdout = nothing pushed.
 #
 # Portable across macOS / Linux / Windows(git-bash). No hardcoded interpreter

@@ -1,13 +1,14 @@
 {
-  "hermes_home": "~/.hermes",
+  "hermes_home": "$HERMES_HOME",
   "timezone": "Asia/Shanghai",
   "since_hours": 24,
   "max_messages": 20,
   "unseen_only": false,
   "llm": {
-    "base_url": "https://sub.shengchuiye.com/v1",
-    "model": "MiniMax-M3",
-    "timeout_seconds": 30
+    "base_url": "http://127.0.0.1:3425/v1",
+    "model": "group/deepseek-v4-1-flash",
+    "timeout_seconds": 180,
+    "max_tokens": 8192
   },
   "imap": {
     "host": "imap.qq.com",

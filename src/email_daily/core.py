@@ -8,7 +8,7 @@ single machine, so the repo runs unchanged on macOS, Linux and Windows.
 
 Public entry point:
     build_digest(since_hours=24, max_messages=20, unseen_only=False,
-                 llm_model="MiniMax-M3",
+                 llm_model="MiniMax-M3.1-Flash",
                  base_url="https://sub.shengchuiye.com/v1")
         -> (text_to_send: str, message_count: int)
 
@@ -41,8 +41,23 @@ CST = timezone(timedelta(hours=8), "Asia/Shanghai")
 IMAP_HOST_DEFAULT = "imap.qq.com"
 IMAP_PORT_DEFAULT = 993
 LLM_BASE_URL_DEFAULT = "https://sub.shengchuiye.com/v1"
-LLM_MODEL_DEFAULT = "MiniMax-M3"
-LLM_TIMEOUT_SECONDS = 30
+# Only a name the gateway actually serves will answer; the retired
+# "MiniMax-M3" returned 404 and silently downgraded every digest to the
+# raw-list fallback. LLM_MODEL in the environment overrides this default.
+LLM_MODEL_DEFAULT = "MiniMax-M3.1-Flash"
+# Reasoning models think before answering, so the read timeout has to cover
+# deliberation as well as the (short) digest itself.
+LLM_TIMEOUT_SECONDS = 180
+# Generous output budget: modern reasoning models spend most of it on
+# reasoning_content before emitting the digest. Override with LLM_MAX_TOKENS.
+LLM_MAX_TOKENS_DEFAULT = 8192
+
+
+def _max_tokens() -> int:
+    try:
+        return int(os.environ.get("LLM_MAX_TOKENS") or LLM_MAX_TOKENS_DEFAULT)
+    except ValueError:
+        return LLM_MAX_TOKENS_DEFAULT
 
 
 @dataclass
@@ -240,7 +255,10 @@ def _llm_summarize(items: list[MailItem], api_key: str, base_url: str,
             {"role": "user", "content": user_prompt},
         ],
         "temperature": 0.2,
-        "max_tokens": 800,
+        # Generous on purpose: modern reasoning models spend most of the budget
+        # on reasoning_content before they emit the digest, and a tight cap
+        # returns content=None (verified with minimax-m3.1-flash at 800).
+        "max_tokens": _max_tokens(),
     }
     req = urllib.request.Request(
         f"{base_url.rstrip('/')}/chat/completions",
@@ -261,10 +279,20 @@ def _llm_summarize(items: list[MailItem], api_key: str, base_url: str,
         print(f"[email-daily] LLM call failed: {exc}", file=sys.stderr)
         return None
     try:
-        content = data["choices"][0]["message"]["content"].strip()
+        message = data["choices"][0]["message"]
+        # A reasoning model can spend the whole max_tokens budget on
+        # reasoning_content and hand back content=None; that is a failed
+        # summary, not a crash — the caller falls back to the raw list.
+        content = (message.get("content") or "").strip()
         # Strip reasoning traces emitted by reasoning-capable models (M-series).
         # They wrap thoughts in <think>...</think> tags that pollute the digest.
         content = re.sub(r"<think>.*?</think>\s*", "", content, flags=re.DOTALL).strip()
+        if not content:
+            print(f"[email-daily] LLM returned empty content "
+                  f"(finish_reason={data['choices'][0].get('finish_reason')!r}, "
+                  f"reasoning={'yes' if message.get('reasoning_content') else 'no'})",
+                  file=sys.stderr)
+            return None
         return content
     except (KeyError, IndexError, TypeError):
         print(f"[email-daily] LLM response malformed: {data!r}", file=sys.stderr)
@@ -289,7 +317,9 @@ def build_digest(since_hours: int = 24,
     port = int(os.environ.get("IMAP_PORT", str(IMAP_PORT_DEFAULT)))
     user = os.environ.get("IMAP_USER", "").strip()
     password = os.environ.get("IMAP_PASS", "")
-    api_key = os.environ.get("OPENAI_API_KEY") or os.environ.get("LLM_API_KEY", "")
+    # LLM_API_KEY is this pipeline's own knob and wins; OPENAI_API_KEY stays as
+    # the legacy fallback so older hosts keep working unchanged.
+    api_key = os.environ.get("LLM_API_KEY") or os.environ.get("OPENAI_API_KEY", "")
 
     today_label = datetime.now(CST).strftime("%Y-%m-%d")
 

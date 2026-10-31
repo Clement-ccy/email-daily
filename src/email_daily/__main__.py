@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 
 from .core import build_digest, IMAP_HOST_DEFAULT, LLM_BASE_URL_DEFAULT, LLM_MODEL_DEFAULT
@@ -13,8 +14,10 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--unseen-only", action="store_true",
                    help="[legacy] restrict to UNSEEN (default is ALL in last window)")
     p.add_argument("--imap-host", default=IMAP_HOST_DEFAULT)
-    p.add_argument("--model", default=LLM_MODEL_DEFAULT)
-    p.add_argument("--base-url", default=LLM_BASE_URL_DEFAULT)
+    # LLM_MODEL in $HERMES_HOME/.env wins, so a gateway-side rename is a config
+    # edit instead of a code change. --model still overrides everything.
+    p.add_argument("--model", default=os.environ.get("LLM_MODEL") or LLM_MODEL_DEFAULT)
+    p.add_argument("--base-url", default=os.environ.get("LLM_BASE_URL") or LLM_BASE_URL_DEFAULT)
     p.add_argument("--dry-run", action="store_true", help="Skip actual send; print to stdout only")
     args = p.parse_args(argv)
 
