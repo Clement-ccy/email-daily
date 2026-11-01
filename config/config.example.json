@@ -6,7 +6,7 @@
   "unseen_only": false,
   "llm": {
     "base_url": "http://127.0.0.1:3425/v1",
-    "model": "group/deepseek-v4-1-flash",
+    "model": "minimax-code/MiniMax-M3.1-Flash",
     "timeout_seconds": 180,
     "max_tokens": 8192
   },

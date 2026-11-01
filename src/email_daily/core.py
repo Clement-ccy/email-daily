@@ -9,7 +9,7 @@ single machine, so the repo runs unchanged on macOS, Linux and Windows.
 Public entry point:
     build_digest(since_hours=24, max_messages=20, unseen_only=False,
                  llm_model="MiniMax-M3.1-Flash",
-                 base_url="https://sub.shengchuiye.com/v1")
+                 base_url="http://127.0.0.1:3425/v1")
         -> (text_to_send: str, message_count: int)
 
 LLM is intentionally optional: when the API is unreachable or the call fails,
@@ -40,11 +40,11 @@ from typing import Any  # noqa: F401  — used in type annotations below
 CST = timezone(timedelta(hours=8), "Asia/Shanghai")
 IMAP_HOST_DEFAULT = "imap.qq.com"
 IMAP_PORT_DEFAULT = 993
-LLM_BASE_URL_DEFAULT = "https://sub.shengchuiye.com/v1"
+LLM_BASE_URL_DEFAULT = "http://127.0.0.1:3425/v1"
 # Only a name the gateway actually serves will answer; the retired
 # "MiniMax-M3" returned 404 and silently downgraded every digest to the
 # raw-list fallback. LLM_MODEL in the environment overrides this default.
-LLM_MODEL_DEFAULT = "MiniMax-M3.1-Flash"
+LLM_MODEL_DEFAULT = "minimax-code/MiniMax-M3.1-Flash"
 # Reasoning models think before answering, so the read timeout has to cover
 # deliberation as well as the (short) digest itself.
 LLM_TIMEOUT_SECONDS = 180
